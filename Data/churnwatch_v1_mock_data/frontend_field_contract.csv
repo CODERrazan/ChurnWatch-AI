@@ -1,0 +1,22 @@
+﻿frontend_section,field,purpose,source
+Overview,total_customers,Customer count in cohort,GET /api/dashboard
+Overview,historical_churn_count,Observed synthetic follow-up outcomes,GET /api/dashboard
+Overview,historical_churn_rate,Descriptive historical rate not forecast,GET /api/dashboard
+Overview,risk_distribution,Latest snapshot counts by Low Medium High,GET /api/dashboard
+Overview,churn_rate_by_segment,Historical outcome rates by available segment,GET /api/dashboard
+Overview,retrospective_evaluation,Eligible 30d and 90d rule-alert comparisons,GET /api/dashboard
+Customer explorer,customer_id,Pseudonymous synthetic customer identifier,GET /api/customers
+Customer explorer,risk_category,Rule-based Low Medium High indicator category,GET /api/customers
+Customer detail,profile,Joined profile from customers.csv,GET /api/customers/{customer_id}
+Customer detail,current_snapshot,Selected snapshot fields excluding labels and synthetic scenario fields (snapshot is a backwards-compatible alias),GET /api/customers/{customer_id}
+Customer detail,risk_assessment,Point score and evidence factors not probability,GET /api/customers/{customer_id}
+Customer analysis,executive_summary,Validated Groq explanation of supplied evidence,POST /api/customers/{customer_id}/analyze
+Customer analysis,retention_recommendations,Actions with priority rationale owner and success indicator,POST /api/customers/{customer_id}/analyze
+Customer analysis,historical_outcome,Eligible retrospective label separate from risk evidence,POST /api/customers/{customer_id}/analyze
+Customer analysis,llm_metadata,Provider model latency token usage status and request ID,POST /api/customers/{customer_id}/analyze
+Monitoring,request_status,LLM status and safe error category,GET /api/monitoring/requests
+Monitoring,latency_ms,Measured LLM elapsed time,GET /api/monitoring/requests
+Monitoring,token_usage,Provider-reported token usage,GET /api/monitoring/requests
+Monitoring,llm_correctness_status,Not evaluated until independent review,GET /api/monitoring/requests
+Monitoring,evaluation_status,Outcome eligibility and rule-alert comparison,GET /api/monitoring/requests
+Provenance,data_notice,All records and results are synthetic demonstration data,All API responses

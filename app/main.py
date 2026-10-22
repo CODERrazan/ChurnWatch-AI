@@ -4,166 +4,124 @@ from collections import Counter, deque
 from contextlib import asynccontextmanager
 from typing import Any
 import pandas as pd
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Query, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, Response
-from pydantic import BaseModel, Field, ConfigDict
-from . import config, core
+from . import banking, config, monitoring_client
 
-logging.basicConfig(level=logging.INFO, format='%(message)s')
-log = logging.getLogger('churnwatch')
-DATA: pd.DataFrame | None = None
-MODEL = None
-FEATURES: list[str] = []
-METRICS: dict[str, Any] = {}
-SUMMARY: dict[str, Any] = {}
-COUNTS: Counter = Counter()
-LATENCIES: deque = deque(maxlen=10000)
-RISK_COUNTS: Counter = Counter()
-MODEL_FAILURES = 0
-MODEL_LATENCIES: deque = deque(maxlen=10000)
-TOKEN_COUNTS: Counter = Counter()
-LLM_COUNTS: Counter = Counter()
+logging.basicConfig(level=logging.INFO,format='%(message)s')
+log=logging.getLogger('churnwatch.api')
+BUNDLE:banking.DataBundle|None=None
+DASHBOARD:dict[str,Any]={}
+LATEST:pd.DataFrame|None=None
+RECENT:deque=deque(maxlen=100)
+HISTORY:dict[str,list[dict[str,Any]]]={}
+COUNTS:Counter=Counter(); LATENCIES:deque=deque(maxlen=10000)
 
 @asynccontextmanager
-async def lifespan(_app: FastAPI):
-    initialize()
-    yield
+async def lifespan(_app:FastAPI):
+    initialize(); yield
 
-app = FastAPI(title='ChurnWatch AI Banking API', version='2.0.0', description='Synthetic banking churn intelligence backend. Scores and metrics are computed in Python; Groq interprets structured results.', lifespan=lifespan)
+app=FastAPI(title='ChurnWatch AI Banking Analytics API',version='3.0.0',description='Synthetic-data demo API. Transparent rule indicators assess risk; Groq explains supplied evidence.',lifespan=lifespan)
+_default_frontend_origins='http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173'
+_frontend_origins=[origin.strip() for origin in __import__('os').getenv('FRONTEND_ORIGINS',_default_frontend_origins).split(',') if origin.strip()]
+app.add_middleware(CORSMiddleware,allow_origins=_frontend_origins,allow_credentials=True,allow_methods=['*'],allow_headers=['*'])
 
-def initialize() -> None:
-    global DATA, MODEL, FEATURES, METRICS, SUMMARY
-    DATA = core.load_data()
-    MODEL, METRICS = core.build_model(DATA)
-    FEATURES = core.feature_columns(DATA)
-    SUMMARY = core.analytics(DATA)
-    # Persist the deployable full-data pipeline and held-out evaluation metadata.
-    core.ARTIFACT_PATH.parent.mkdir(parents=True, exist_ok=True)
-    import joblib
-    joblib.dump({'model': MODEL, 'features': FEATURES, 'metrics': METRICS, 'rows': len(DATA), 'seed': core.SEED, 'version': core.MODEL_VERSION, 'trained_at': time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime())}, core.ARTIFACT_PATH)
+def initialize():
+    global BUNDLE,DASHBOARD,LATEST
+    BUNDLE=banking.load_bundle()
+    DASHBOARD=banking.dashboard(BUNDLE)
+    LATEST=BUNDLE.snapshots.sort_values('snapshot_date').groupby('customer_id',sort=False).tail(1).copy()
+    LATEST['assessment']=LATEST.apply(lambda r:banking.assess(r.to_dict()),axis=1)
 
-def ready() -> None:
-    if DATA is None or MODEL is None: initialize()
+def ready():
+    if BUNDLE is None: initialize()
 
-class CustomerRequest(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-    customer: dict[str, Any]
-
-class BatchRequest(BaseModel):
-    model_config = ConfigDict(extra='forbid')
-    customers: list[dict[str, Any]] = Field(min_length=1, max_length=500)
-
-
-def validate_customer(customer: dict[str, Any]) -> pd.DataFrame:
-    missing = [c for c in FEATURES if c not in customer]
-    extra = [c for c in customer if c not in FEATURES]
-    if missing or extra:
-        raise HTTPException(422, {'code':'invalid_customer_features','missing_fields':missing,'unsupported_fields':extra})
-    row = pd.DataFrame([{c: customer[c] for c in FEATURES}])
-    if row.isna().any().any():
-        raise HTTPException(422, {'code':'null_feature_value'})
-    try:
-        for c in row.select_dtypes(include=['object','str']).columns: row[c] = row[c].astype(str)
-        for c in row.columns:
-            if c not in row.select_dtypes(include=['object','str']).columns: row[c] = pd.to_numeric(row[c], errors='raise')
-    except (ValueError, TypeError):
-        raise HTTPException(422, {'code':'invalid_feature_type'})
-    return row
+def fallback_answer(assessment:dict[str,Any])->dict[str,Any]:
+    factors=assessment['risk_factors']
+    summary=(f"Rule-based screening found {len(factors)} documented risk indicators ({assessment['risk_category']} category)." if factors else 'No configured risk indicators crossed their review thresholds in this snapshot.')
+    insights=[f['interpretation'] for f in factors[:5]] or ['No configured risk threshold was crossed; this does not guarantee that churn will not occur.']
+    return {'executive_summary':summary,'customer_insights':insights,'retention_recommendations':banking.recommendations_for(assessment),'limitations':assessment['limitations']}
 
 @app.middleware('http')
-async def observe(request: Request, call_next):
-    rid = request.headers.get('X-Request-ID') or str(uuid.uuid4())
-    start = time.perf_counter()
-    try:
-        response = await call_next(request)
+async def observe(request:Request,call_next):
+    request.state.request_id=str(uuid.uuid4())
+    start=time.perf_counter()
+    try: response=await call_next(request)
     except Exception:
-        COUNTS[(request.method, request.url.path, 500)] += 1
-        log.exception('request_failed request_id=%s path=%s', rid, request.url.path)
-        response = JSONResponse(status_code=500, content={'detail':{'code':'internal_error','message':'The request could not be completed.'}})
-    elapsed = time.perf_counter()-start
-    LATENCIES.append(elapsed)
-    COUNTS[(request.method, request.url.path, response.status_code)] += 1
-    response.headers['X-Request-ID'] = rid
-    log.info(json.dumps({'event':'request','request_id':rid,'method':request.method,'path':request.url.path,'status':response.status_code,'latency_ms':round(elapsed*1000,3)}))
+        log.exception('request_failed request_id=%s path=%s',request.state.request_id,request.url.path)
+        response=JSONResponse(status_code=500,content={'detail':{'code':'internal_error','message':'Request failed.'}})
+    elapsed=(time.perf_counter()-start)*1000
+    LATENCIES.append(elapsed); COUNTS[(request.method,request.url.path,response.status_code)]+=1
+    response.headers['X-Request-ID']=request.state.request_id
+    log.info(json.dumps({'event':'api_request','request_id':request.state.request_id,'method':request.method,'path':request.url.path,'status':response.status_code,'latency_ms':round(elapsed,3)}))
     return response
 
-@app.get('/health')
+@app.get('/api/health')
 def health():
-    model_ok = MODEL is not None
-    return {'status':'ok' if model_ok else 'degraded','application':'ok','model':{'status':'available' if model_ok else 'unavailable'},'llm':{'status':'available' if core.llm_status()['configured'] else 'unconfigured','model':core.llm_status()['model']}}
-
-@app.get('/model/info')
-def model_info():
     ready()
-    return {'model_version':core.MODEL_VERSION,'algorithm':'class-weighted logistic regression','training_rows':len(DATA),'random_seed':core.SEED,'evaluation':METRICS,'features':FEATURES,'excluded_features':sorted(core.EXCLUDED),'risk_thresholds':{'low':'p < 0.35','medium':'0.35 <= p < 0.65','high':'p >= 0.65'},'threshold_basis':'Fixed, transparent MVP display bands; not optimized against business costs.'}
+    return {'status':'ok','application':'available','dataset':'available','data_notice':banking.SYNTHETIC_NOTICE,'groq':{'configured':bool(__import__('os').getenv('GROQ_API_KEY')),'model':__import__('os').getenv('GROQ_MODEL','openai/gpt-oss-120b')},'monitoring':{'url':__import__('os').getenv('MONITORING_URL','http://127.0.0.1:8010'),'database_connection':'not_checked_by_main_api'}}
 
-@app.get('/analytics/overview')
-def overview():
+@app.get('/api/dashboard')
+def get_dashboard():
     ready()
-    scored = MODEL.predict_proba(DATA[FEATURES])[:,1]
-    dist = {name:int(sum(core.risk_category(float(p))==name for p in scored)) for name in ('Low','Medium','High')}
-    return {**SUMMARY,'risk_distribution':dist,'model_metrics':METRICS,'data_notice':'Synthetic development and demonstration data; not real banking data.'}
-
-@app.post('/predict')
-def predict(request: CustomerRequest):
-    ready(); row=validate_customer(request.customer)
-    global MODEL_FAILURES
-    try: result=core.score(MODEL,row,FEATURES); MODEL_LATENCIES.append(result['model_latency_ms'])
-    except Exception:
-        MODEL_FAILURES += 1
-        COUNTS[('prediction_failure',)] += 1
-        log.exception('prediction_failed')
-        raise HTTPException(500, {'code':'prediction_failed','message':'The prediction could not be computed.'})
-    RISK_COUNTS[result['risk_category']] += 1
-    return {'status':'success','prediction':result}
-
-@app.post('/predict/batch')
-def predict_batch(request: BatchRequest):
-    ready(); outputs=[]
-    for customer in request.customers:
-        row=validate_customer(customer); result=core.score(MODEL,row,FEATURES); MODEL_LATENCIES.append(result['model_latency_ms']); RISK_COUNTS[result['risk_category']] += 1; outputs.append(result)
-    return {'status':'success','count':len(outputs),'predictions':outputs}
-
-@app.post('/analyze')
-def analyze(request: CustomerRequest):
-    ready(); row=validate_customer(request.customer)
-    global MODEL_FAILURES
-    try: prediction=core.score(MODEL,row,FEATURES); MODEL_LATENCIES.append(prediction['model_latency_ms'])
-    except Exception:
-        MODEL_FAILURES += 1
-        COUNTS[('prediction_failure',)] += 1
-        raise HTTPException(500, {'code':'prediction_failed','message':'The prediction could not be computed.'})
-    started=time.perf_counter()
-    llm=core.groq_explanation({k:v for k,v in prediction.items() if k!='model_latency_ms'},request.customer)
-    llm_ms=round((time.perf_counter()-started)*1000,3)
-    LLM_COUNTS[llm.get('status','unavailable')] += 1
-    if llm.get('error_category'): LLM_COUNTS[llm['error_category']] += 1
-    usage=llm.get('token_usage') or {}
-    for token_name, token_count in usage.items():
-        if token_name in {'prompt_tokens','completion_tokens','total_tokens'} and isinstance(token_count,int): TOKEN_COUNTS[token_name] += token_count
-    result={'status':'success','prediction':prediction,'llm':{**llm,'latency_ms':llm_ms}}
-    if llm['status']!='available': result['fallback_explanation']={'source':'model_contributions','explanation':prediction['explanation'],'recommended_actions':prediction['recommended_actions']}
+    result=dict(DASHBOARD); result['recent_analysis_activity']=list(RECENT)[:20]
     return result
 
-@app.get('/metrics')
+@app.get('/api/customers')
+def customers(page:int=Query(1,ge=1),page_size:int=Query(50,ge=1,le=200),risk_category:str|None=None,customer_segment:str|None=None,search:str|None=None):
+    ready()
+    if risk_category and risk_category not in {'Low','Medium','High'}: raise HTTPException(422,{'code':'invalid_risk_category'})
+    frame=LATEST.copy()
+    frame['risk_category']=frame.assessment.map(lambda a:a['risk_category'])
+    if risk_category: frame=frame[frame.risk_category==risk_category]
+    if customer_segment: frame=frame[frame.customer_segment==customer_segment]
+    if search: frame=frame[frame.customer_id.str.contains(search,case=False,regex=False)]
+    frame['_risk_order']=frame.risk_category.map({'High':3,'Medium':2,'Low':1})
+    frame=frame.sort_values(['_risk_order','customer_id'],ascending=[False,True])
+    total=len(frame); start=(page-1)*page_size; selected=frame.iloc[start:start+page_size]
+    items=[]
+    for _,row in selected.iterrows():
+        a=row.assessment
+        items.append({'customer_id':row.customer_id,'customer_segment':row.customer_segment,'snapshot_date':row.snapshot_date.date().isoformat(),'risk_category':a['risk_category'],'risk_score':a['risk_score'],'risk_score_unit':a['risk_score_unit'],'risk_factor_count':len(a['risk_factors'])})
+    return {'data_notice':banking.SYNTHETIC_NOTICE,'page':page,'page_size':page_size,'total':total,'customers':items}
+
+@app.get('/api/customers/{customer_id}')
+def customer_detail(customer_id:str,snapshot_date:str|None=None):
+    ready()
+    if customer_id not in set(BUNDLE.customers.customer_id): raise HTTPException(404,{'code':'customer_not_found'})
+    try: row=banking.latest_snapshot(BUNDLE,customer_id,snapshot_date)
+    except ValueError as exc: raise HTTPException(422,{'code':'invalid_snapshot_date','message':str(exc)})
+    except KeyError: raise HTTPException(404,{'code':'snapshot_not_found'})
+    profile=banking.profile_dict(BUNDLE,customer_id); snap=banking.snapshot_dict(row); assessment=banking.assess(row.to_dict())
+    return {'data_notice':banking.SYNTHETIC_NOTICE,'customer_id':customer_id,'profile':profile,'snapshot_date':row.snapshot_date.date().isoformat(),'current_snapshot':snap,'snapshot':snap,'risk_assessment':assessment,'historical_outcome':banking.eligible_outcome(BUNDLE,row),'analysis_history':HISTORY.get(customer_id,[])}
+
+@app.post('/api/customers/{customer_id}/analyze')
+def analyze_customer(customer_id:str,request:Request,snapshot_date:str|None=None):
+    ready()
+    if customer_id not in set(BUNDLE.customers.customer_id): raise HTTPException(404,{'code':'customer_not_found'})
+    try: row=banking.latest_snapshot(BUNDLE,customer_id,snapshot_date)
+    except ValueError as exc: raise HTTPException(422,{'code':'invalid_snapshot_date','message':str(exc)})
+    except KeyError: raise HTTPException(404,{'code':'snapshot_not_found'})
+    rid=request.state.request_id; profile=banking.profile_dict(BUNDLE,customer_id); snap=banking.snapshot_dict(row)
+    assessment=banking.assess(row.to_dict()); segment=banking.segment_comparison(BUNDLE,str(profile.get('customer_segment','')))
+    llm=banking.groq_analysis(profile=profile,snapshot=snap,assessment=assessment,segment=segment,request_id=rid)
+    # Preserve the measured provider-call latency; assessment latency is independent.
+    meta=llm['metadata']; answer=llm['answer'] or fallback_answer(assessment)
+    evaluation=banking.eligible_outcome(BUNDLE,row)
+    event=monitoring_client.build_event(request_id=rid,metadata=meta,assessment_type=assessment['assessment_type'],risk_category=assessment['risk_category'],customer_id=customer_id,snapshot_date=row.snapshot_date.date().isoformat(),evaluation=evaluation,answer=llm['answer'])
+    monitoring=monitoring_client.emit(event)
+    response={'data_notice':banking.SYNTHETIC_NOTICE,'request_id':rid,'customer_id':customer_id,'profile':profile,'snapshot_date':row.snapshot_date.date().isoformat(),'current_snapshot':snap,'risk_assessment':assessment,'executive_summary':answer['executive_summary'],'customer_insights':answer['customer_insights'],'retention_recommendations':answer['retention_recommendations'],'historical_outcome':evaluation,'limitations':answer['limitations'],'segment_comparison':segment,'llm_metadata':meta,'monitoring':{'prediction_id':rid,**monitoring,'evaluation_status':event['evaluation_status'],'rule_alert_match_30d':next((x['rule_alert_match'] for x in event['actual_outcomes'] if x['horizon_days']==30),None),'llm_correctness_status':'not_evaluated'}}
+    RECENT.appendleft({'request_id':rid,'customer_id':customer_id,'snapshot_date':response['snapshot_date'],'risk_category':assessment['risk_category'],'llm_status':meta['status'],'monitoring_delivery':monitoring['delivery_status']})
+    HISTORY.setdefault(customer_id,[]).insert(0,{'request_id':rid,'snapshot_date':response['snapshot_date'],'llm_status':meta['status'],'risk_category':assessment['risk_category']})
+    HISTORY[customer_id]=HISTORY[customer_id][:20]
+    return response
+
+@app.get('/api/metrics')
 def metrics():
-    values=sorted(LATENCIES)
-    def pct(q): return round(values[min(len(values)-1,int((len(values)-1)*q))]*1000,3) if values else None
-    lines=['# HELP churnwatch_http_requests_total Requests by method, path, and status.','# TYPE churnwatch_http_requests_total counter']
-    for (method,path,status),count in COUNTS.items():
-        if isinstance(method,str): lines.append(f'churnwatch_http_requests_total{{method="{method}",path="{path}",status="{status}"}} {count}')
-    lines += ['# HELP churnwatch_request_latency_ms Quantiles over the retained request latency window.','# TYPE churnwatch_request_latency_ms gauge']
-    for q,label in ((.5,'p50'),(.95,'p95'),(.99,'p99')):
-        if pct(q) is not None: lines.append(f'churnwatch_request_latency_ms{{quantile="{label}"}} {pct(q)}')
-    for category,count in RISK_COUNTS.items(): lines.append(f'churnwatch_predictions_total{{risk="{category}"}} {count}')
-    for status,count in LLM_COUNTS.items(): lines.append(f'churnwatch_llm_events_total{{category="{status}"}} {count}')
-    for name,count in TOKEN_COUNTS.items(): lines.append(f'churnwatch_llm_tokens_total{{type="{name}"}} {count}')
-    lines.append(f'churnwatch_model_inference_failures_total {MODEL_FAILURES}')
-    mvals=sorted(MODEL_LATENCIES)
-    if mvals:
-        for q,label in ((.5,'p50'),(.95,'p95'),(.99,'p99')): lines.append(f'churnwatch_model_inference_latency_ms{{quantile="{label}"}} {mvals[min(len(mvals)-1,int((len(mvals)-1)*q))]}')
+    vals=sorted(LATENCIES)
+    lines=['# TYPE churnwatch_api_requests_total counter']
+    for (method,path,status),count in COUNTS.items(): lines.append(f'churnwatch_api_requests_total{{method="{method}",path="{path}",status="{status}"}} {count}')
+    for q,name in ((.5,'p50'),(.95,'p95'),(.99,'p99')):
+        if vals: lines.append(f'churnwatch_api_latency_ms{{quantile="{name}"}} {vals[min(len(vals)-1,int((len(vals)-1)*q))]:.3f}')
     return Response('\n'.join(lines)+'\n',media_type='text/plain; version=0.0.4')
-
-@app.get('/')
-def root(): return {'name':'ChurnWatch AI','docs':'/docs','health':'/health'}
-

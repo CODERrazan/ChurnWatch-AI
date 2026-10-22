@@ -1,0 +1,44 @@
+column,dtype,description
+customer_id,object,"Pseudonymous synthetic customer identifier; use for grouping/joining, not as a predictive feature."
+snapshot_date,object,"Date the available features were observed; use for chronological splitting, not as a raw feature by default."
+months_since_start,int64,Month index within synthetic observation window.
+customer_segment,object,Synthetic customer segment.
+age,int64,Synthetic age; consider excluding from actionable risk explanations and assess fairness.
+monthly_income_sar,float64,Synthetic monthly income in SAR.
+tenure_months,int64,"Length of banking relationship at snapshot, in months."
+active_products_count,int64,Number of active products at snapshot.
+regular_salary_inflow,int64,Whether regular salary inflow is observed.
+autopay_enabled,int64,Whether autopay is enabled.
+loan_active,int64,Whether a loan is active.
+debit_card_active,int64,Whether debit card is active.
+digital_banking_enrolled,int64,Whether digital banking is enabled.
+monthly_transaction_count,int64,Approximate monthly transaction count.
+transaction_count_change_3m_pct,float64,Change in transaction count over recent three-month window.
+active_digital_days_30d,int64,Days with digital activity in past 30 days.
+digital_days_change_3m_pct,float64,Change in active digital days over recent three-month window.
+digital_logins_30d,int64,Digital login count in past 30 days.
+digital_sessions_30d,int64,Digital session count in past 30 days.
+average_monthly_balance_sar,float64,Approximate average monthly balance in SAR.
+balance_change_3m_pct,float64,Change in balance over recent three-month window.
+failed_transaction_rate_pct,float64,Share of failed transactions.
+card_declines_30d,int64,Declined card transaction count in past 30 days.
+app_crashes_30d,int64,App crash count in past 30 days.
+failed_login_attempts_30d,int64,Failed login attempts in past 30 days.
+support_tickets_90d,int64,Support ticket count in past 90 days.
+unresolved_tickets,int64,Number of unresolved support tickets at snapshot.
+repeat_contact_same_issue_90d,int64,Repeated support contacts for same issue in past 90 days.
+complaints_90d,int64,Complaint count in past 90 days.
+median_resolution_hours,float64,Median support resolution time in hours.
+nps_score,int64,Synthetic NPS-style score on 0–10 scale.
+external_transfer_count_30d,int64,External transfer count in past 30 days; not proof of competitor usage.
+external_transfer_count_change_3m_pct,float64,Change in external transfers; proxy signal only.
+missed_salary_inflow_30d,int64,Whether expected salary inflow was missed.
+bank_fee_charges_90d,int64,Count of bank fee charges in past 90 days.
+overdraft_days_90d,int64,Number of days in overdraft in past 90 days.
+recurring_payments_count,int64,Count of recurring payments observed.
+branch_visits_90d,int64,Branch visits in past 90 days.
+snapshot_data_is_synthetic,bool,Provenance flag; not a predictive feature.
+churn_within_30d,int64,"Target label: churn event in next 30 days, derived from future synthetic event date; never use as feature."
+churn_within_90d,float64,Target label: churn event in next 90 days; never use as feature.
+label_observed_30d,int64,Whether a complete 30-day outcome window is available for this snapshot.
+label_observed_90d,int64,Whether a complete 90-day outcome window is available for this snapshot.

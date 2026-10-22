@@ -1,0 +1,88 @@
+{
+  "data_notice": "Synthetic demonstration data only; not real banking data.",
+  "request_id": "example-request-id-0001",
+  "customer_id": "CUST_00042",
+  "snapshot_date": "2026-10-01",
+  "risk_assessment": {
+    "assessment_type": "transparent_rule_based_indicator_score",
+    "risk_category": "Medium",
+    "risk_score": 3,
+    "risk_score_unit": "points (not probability)",
+    "thresholds": {
+      "Low": "0-2 points",
+      "Medium": "3-5 points",
+      "High": "6+ points"
+    },
+    "risk_factors": [
+      {
+        "feature": "transaction_count_change_3m_pct",
+        "observed_value": -21.94,
+        "direction": "risk_indicator",
+        "points": 2,
+        "interpretation": "Transaction activity declined by at least 20% over the recent three-month window."
+      },
+      {
+        "feature": "digital_days_change_3m_pct",
+        "observed_value": -30.18,
+        "direction": "risk_indicator",
+        "points": 1,
+        "interpretation": "Digital activity days declined by at least 20%."
+      }
+    ],
+    "limitations": [
+      "Heuristic indicators are not a trained model or calibrated churn probability.",
+      "Indicators describe associations and do not establish causes or customer intent.",
+      "Synthetic demo data does not establish real-world banking performance."
+    ]
+  },
+  "executive_summary": "Two engagement indicators crossed the documented review thresholds in this synthetic snapshot. This point score is not a churn probability.",
+  "customer_insights": [
+    "Transaction activity fell 21.94% over the recent three-month window.",
+    "Digital activity days fell 30.18% over the same comparison window."
+  ],
+  "retention_recommendations": [
+    {
+      "action": "Ask whether recent activity changes reflect a service issue or a changed banking need.",
+      "rationale": "Transaction activity declined beyond the documented review threshold.",
+      "priority": "medium",
+      "suggested_owner": "relationship_manager",
+      "success_indicator": "customer_confirmed_need_and_30d_transaction_activity"
+    },
+    {
+      "action": "Offer help with digital banking access or common tasks if the customer wants assistance.",
+      "rationale": "Active digital days declined beyond the documented review threshold.",
+      "priority": "medium",
+      "suggested_owner": "digital_banking_support",
+      "success_indicator": "30d_active_digital_days"
+    },
+    {
+      "action": "Review transaction and digital activity again after 30 days and compare with this snapshot.",
+      "rationale": "A follow-up checks whether the observed indicators persist without assuming their cause.",
+      "priority": "low",
+      "suggested_owner": "customer_success",
+      "success_indicator": "30d_change_in_transaction_and_digital_activity"
+    }
+  ],
+  "historical_outcome": {
+    "label_30d": 0,
+    "label_90d": null,
+    "label_observed_30d": true,
+    "label_observed_90d": false,
+    "retrospective_only": true
+  },
+  "llm_metadata": {
+    "provider": "groq",
+    "model": "openai/gpt-oss-120b",
+    "status": "example_only",
+    "latency_ms": null,
+    "token_usage": null,
+    "request_id": "example-request-id-0001"
+  },
+  "monitoring": {
+    "prediction_id": null,
+    "delivery_status": "example_only",
+    "evaluation_status": "eligible_retrospective_outcome",
+    "rule_alert_match_30d": false,
+    "llm_correctness_status": "not_evaluated"
+  }
+}
