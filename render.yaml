@@ -1,0 +1,60 @@
+# Render Blueprint: creates the three ChurnWatch services from this repo.
+# Values marked "sync: false" are entered in the Render dashboard (never committed).
+services:
+  # 1) Main customer API (FastAPI)
+  - type: web
+    name: churnwatch-api
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn app.main:app --host 0.0.0.0 --port $PORT
+    healthCheckPath: /api/health
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: GROQ_MODEL
+        value: openai/gpt-oss-120b
+      - key: GROQ_TIMEOUT_SECONDS
+        value: "20"
+      - key: MONITORING_TIMEOUT_SECONDS
+        value: "3"
+      - key: GROQ_API_KEY
+        sync: false
+      - key: MONITORING_URL # e.g. https://churnwatch-monitoring.onrender.com
+        sync: false
+      - key: FRONTEND_ORIGINS # e.g. https://churnwatch-web.onrender.com
+        sync: false
+
+  # 2) Monitoring service (FastAPI + Supabase PostgreSQL)
+  - type: web
+    name: churnwatch-monitoring
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: uvicorn monitoring.main:app --host 0.0.0.0 --port $PORT
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.12.7
+      - key: DATABASE_URL # Supabase "Session pooler" connection string
+        sync: false
+      - key: FRONTEND_ORIGINS # e.g. https://churnwatch-web.onrender.com
+        sync: false
+
+  # 3) Frontend (React + Vite static site)
+  - type: web
+    name: churnwatch-web
+    runtime: static
+    rootDir: frontend
+    buildCommand: npm ci && npm run build
+    staticPublishPath: dist
+    routes:
+      - type: rewrite
+        source: /*
+        destination: /index.html
+    envVars:
+      - key: NODE_VERSION
+        value: "20"
+      - key: VITE_API_BASE_URL # e.g. https://churnwatch-api.onrender.com
+        sync: false
+      - key: VITE_MONITORING_API_BASE_URL # e.g. https://churnwatch-monitoring.onrender.com
+        sync: false

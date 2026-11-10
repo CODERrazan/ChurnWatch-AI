@@ -1,13 +1,18 @@
 from __future__ import annotations
+import os
 from datetime import datetime, timezone
 from typing import Any, Literal
 from fastapi import FastAPI, HTTPException, Query
+from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from app import config as _config
 from .database import connect, record_event, recent_events, summary
 from .evaluation import prediction_evaluation
 
 app=FastAPI(title='ChurnWatch Monitoring Service',version='1.0.0',description='Separate Supabase PostgreSQL telemetry service. Apply monitoring/migrations/001_initial.sql before use.')
+_default_frontend_origins='http://localhost:3000,http://localhost:5173,http://127.0.0.1:3000,http://127.0.0.1:5173'
+_frontend_origins=[origin.strip() for origin in os.getenv('FRONTEND_ORIGINS',_default_frontend_origins).split(',') if origin.strip()]
+app.add_middleware(CORSMiddleware,allow_origins=_frontend_origins,allow_methods=['*'],allow_headers=['*'])
 
 class MonitoringEvent(BaseModel):
     request_id:str=Field(min_length=8,max_length=100)
