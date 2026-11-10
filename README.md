@@ -4,6 +4,12 @@
 
 [**Live Demo**](https://churnwatch-web.onrender.com)
 
+## 📄 Project Report
+
+For a detailed overview of ChurnWatch AI, including the methodology, system architecture, implementation, and results, check out the full project report.
+
+📑 [View ChurnWatch AI Project Report](<ChurnWatch_AI_Project_Report (2)_compressed.pdf>)
+
 ## Overview
 
 ChurnWatch AI is a prototype that helps banking teams explore customer behavior, identify potential churn risk, and understand the signals behind each risk assessment. It combines a rule-based risk scoring engine with AI-generated explanations and a monitoring interface.
